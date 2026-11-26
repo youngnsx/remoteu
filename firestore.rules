@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 房間主文件
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if true;
+      // 僅允許密碼相符時更新信令 (offer / answer)
+      allow update: if request.resource.data.password == resource.data.password;
+
+      // WebRTC ICE Candidates 交換子集合
+      match /callerCandidates/{candidateId} {
+        allow read, write, delete: if true;
+      }
+      match /calleeCandidates/{candidateId} {
+        allow read, write, delete: if true;
+      }
+
+      // 聊天室訊息子集合
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if request.resource.data.type in ['text', 'image']
+                      && request.resource.data.content is string;
+      }
+    }
+  }
+}
