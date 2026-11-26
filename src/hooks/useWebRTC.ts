@@ -15,6 +15,7 @@ import {
   where,
 } from 'firebase/firestore';
 import type { DocumentReference, Unsubscribe } from 'firebase/firestore';
+import { deriveRoomKey } from '../lib/roomKey';
 
 const servers: RTCConfiguration = {
   iceServers: [
@@ -51,8 +52,6 @@ async function cleanSignaling(roomRef: DocumentReference) {
   await updateDoc(roomRef, {
     session: deleteField(),
     answer: deleteField(),
-    // 舊版欄位
-    offer: deleteField(),
   });
 }
 
@@ -91,6 +90,8 @@ export function useWebRTC(roomId: string, password: string) {
   const [error, setError] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('pending');
   const [connectionState, setConnectionState] = useState<string>('new');
+  // 驗證通過後的房間金鑰（spaces/{spaceId}），聊天室也用它
+  const [spaceId, setSpaceId] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -237,38 +238,40 @@ export function useWebRTC(roomId: string, password: string) {
     let cancelled = false;
     let isHost = false;
     let unsubRoom: Unsubscribe | null = null;
-    const roomRef = doc(db, 'rooms', roomId);
-    roomRefCache.current = roomRef;
+    let roomRef: DocumentReference | null = null;
 
     const init = async () => {
       const hostTab = isHostTab(roomId);
+      const key = await deriveRoomKey(roomId, password);
+      if (cancelled) return;
+      const ref = doc(db, 'spaces', key);
+      roomRef = ref;
+      roomRefCache.current = ref;
+
       // Firestore 連不上（例如額度用完）時 SDK 會無限重試，這裡加逾時讓使用者看到錯誤
-      const roomSnap = await withTimeout(getDoc(roomRef), 10000);
+      const roomSnap = await withTimeout(getDoc(ref), 10000);
       if (cancelled) return;
 
       if (!roomSnap.exists()) {
+        // 路徑由密碼推導，密碼錯誤和房間不存在無法區分
         if (!hostTab) {
-          setError('房間不存在或已關閉');
+          setError('房間不存在或密碼錯誤');
           return;
         }
         isHost = true;
-        await withTimeout(setDoc(roomRef, { password, createdAt: Date.now() }), 10000);
+        await withTimeout(setDoc(ref, { createdAt: Date.now() }), 10000);
       } else {
-        const data = roomSnap.data();
-        if (data.password !== password) {
-          setError('密碼錯誤');
-          return;
-        }
         // 房主重新整理 → 清掉舊信令
         isHost = hostTab;
-        if (isHost) await cleanSignaling(roomRef);
+        if (isHost) await cleanSignaling(ref);
       }
       if (cancelled) return;
+      setSpaceId(key);
       setRole(isHost ? 'host' : 'guest');
 
       if (isHost) {
         let lastJoinRequest: number | undefined;
-        unsubRoom = onSnapshot(roomRef, async (snapshot) => {
+        unsubRoom = onSnapshot(ref, async (snapshot) => {
           const data = snapshot.data();
           if (!data) return;
 
@@ -300,10 +303,10 @@ export function useWebRTC(roomId: string, password: string) {
         });
       } else {
         // 通知房主有訪客加入，讓房主針對這個訪客重新送 offer
-        await updateDoc(roomRef, { joinRequest: Date.now() });
+        await updateDoc(ref, { joinRequest: Date.now() });
         if (cancelled) return;
-        unsubRoom = onSnapshot(roomRef, (snapshot) => {
-          guestHandleSession(roomRef, snapshot.data()?.session);
+        unsubRoom = onSnapshot(ref, (snapshot) => {
+          guestHandleSession(ref, snapshot.data()?.session);
         });
       }
     };
@@ -328,7 +331,9 @@ export function useWebRTC(roomId: string, password: string) {
       setLocalStream(null);
       setRemoteStream(null);
       setRole('pending');
-      if (isHost) {
+      setSpaceId(null);
+      roomRefCache.current = null;
+      if (isHost && roomRef) {
         cleanSignaling(roomRef).catch(e => console.error('cleanup error:', e));
       }
     };
@@ -366,5 +371,5 @@ export function useWebRTC(roomId: string, password: string) {
     }
   }, [hostNegotiate, stopScreenShare]);
 
-  return { localStream, remoteStream, error, role, isCaller: role === 'host', connectionState, startScreenShare, stopScreenShare };
+  return { localStream, remoteStream, error, role, isCaller: role === 'host', spaceId, connectionState, startScreenShare, stopScreenShare };
 }

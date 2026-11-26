@@ -1,27 +1,54 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // 房間主文件
-    match /rooms/{roomId} {
-      allow read: if true;
-      allow create: if true;
-      // 僅允許密碼相符時更新信令 (offer / answer)
-      allow update: if request.resource.data.password == resource.data.password;
 
-      // WebRTC ICE Candidates 交換子集合
+    // 房間資料放在 spaces/{key}，key = PBKDF2(密碼, roomId) 的 64 字元 hex（見 src/lib/roomKey.ts）。
+    // spaces 不允許 list，必須同時知道 roomId 與密碼才算得出路徑；知道路徑即視為房間成員。
+    // 資料庫不存密碼。舊的 rooms/{roomId}（含明文密碼）沒有對應規則，一律拒絕存取。
+    function validKey(key) {
+      return key.matches('^[0-9a-f]{64}$');
+    }
+
+    match /spaces/{key} {
+      allow get: if validKey(key);
+
+      allow create: if validKey(key)
+                    && request.resource.data.keys().hasOnly(['createdAt'])
+                    && request.resource.data.createdAt is int;
+
+      // 信令欄位：session（房主的 offer）、answer（訪客回覆）、joinRequest（訪客加入通知）
+      allow update: if request.resource.data.keys().hasOnly(['createdAt', 'session', 'answer', 'joinRequest'])
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && request.resource.data.get('session', {}) is map
+                    && request.resource.data.get('answer', {}) is map
+                    && request.resource.data.get('joinRequest', 0) is int;
+
+      // WebRTC ICE candidates，每筆帶 session id
+      function validCandidate() {
+        return request.resource.data.keys().hasOnly(['candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment', 'session'])
+            && request.resource.data.session is string
+            && request.resource.data.get('candidate', '') is string
+            && request.resource.data.get('candidate', '').size() <= 4096;
+      }
       match /callerCandidates/{candidateId} {
-        allow read, write, delete: if true;
+        allow read, delete: if validKey(key);
+        allow create: if validKey(key) && validCandidate();
       }
       match /calleeCandidates/{candidateId} {
-        allow read, write, delete: if true;
+        allow read, delete: if validKey(key);
+        allow create: if validKey(key) && validCandidate();
       }
 
-      // 聊天室訊息子集合
+      // 聊天訊息：只能新增，不能修改或刪除
       match /messages/{messageId} {
-        allow read: if true;
-        allow create: if request.resource.data.type in ['text', 'image']
-                      && request.resource.data.content is string;
+        allow read: if validKey(key);
+        allow create: if validKey(key)
+                      && request.resource.data.keys().hasOnly(['type', 'content', 'sender', 'timestamp'])
+                      && request.resource.data.type in ['text', 'image']
+                      && request.resource.data.content is string
+                      && request.resource.data.content.size() <= 1000000
+                      && request.resource.data.sender in ['caller', 'callee']
+                      && request.resource.data.timestamp is int;
       }
     }
   }

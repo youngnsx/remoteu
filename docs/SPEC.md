@@ -25,28 +25,26 @@
 ## 2. 資料庫結構 (Firestore Schema)
 
 ```text
-firestore/
-├── rooms/
-│   └── {roomId}/
-│       ├── password: string              # 房間進房密碼
-│       ├── createdAt: number             # 建立時間戳記 (毫秒)
-│       ├── offer: map                    # Caller 發布的 SDP Offer
-│       │   ├── type: "offer"
-│       │   └── sdp: string
-│       ├── answer: map                   # Callee 發布的 SDP Answer
-│       │   ├── type: "answer"
-│       │   └── sdp: string
-│       ├── callerCandidates/             # Caller 收集的 ICE 候選路徑 (子集合)
+firestore/（具名資料庫 remoteu）
+├── spaces/                               # 不允許 list，必須算得出 key 才能存取
+│   └── {key}/                            # key = PBKDF2(password, "remoteu:" + roomId) 的 64 字元 hex
+│       ├── createdAt: number             # 建立時間戳記 (毫秒)；不存密碼
+│       ├── session: map                  # 房主發布的 session { id, offer: { type, sdp } }
+│       ├── answer: map                   # 訪客回覆 { session, type, sdp }
+│       ├── joinRequest: number           # 訪客加入時寫入的時間戳記，通知房主重新送 offer
+│       ├── callerCandidates/             # 房主的 ICE candidate (子集合)
 │       │   └── {candidateId}/
-│       │       └── [RTCIceCandidateInit]
-│       ├── calleeCandidates/             # Callee 收集的 ICE 候選路徑 (子集合)
+│       │       └── [RTCIceCandidateInit] + session: string
+│       ├── calleeCandidates/             # 訪客的 ICE candidate (子集合)
 │       │   └── {candidateId}/
-│       │       └── [RTCIceCandidateInit]
-│       └── messages/                     # 即時文字與圖片訊息 (子集合)
+│       │       └── [RTCIceCandidateInit] + session: string
+│       └── messages/                     # 即時文字與圖片訊息 (子集合，只能新增)
 │           └── {messageId}/
 │               ├── type: "text" | "image"
-│               ├── content: string       # 文字內容或 Base64 / Storage URL
+│               ├── content: string       # 文字內容或 Base64 data URL
+│               ├── sender: "caller" | "callee"
 │               └── timestamp: number
+└── rooms/                                # 舊版資料（含明文密碼），規則已全面禁止存取
 ```
 
 ---
@@ -54,15 +52,13 @@ firestore/
 ## 3. 核心功能規格 (Functional Specifications)
 
 ### 3.1 房間驗證與角色分配
-1. 使用者輸入 `roomId` 與 `password`。
-2. 查詢 `rooms/{roomId}` 文件：
-   * **房間不存在**：
-     * 建立該房間文件並儲存密碼。
-     * 當前使用者指派為 **Caller（房主/發起方）**。
-   * **房間已存在**：
-     * 比對輸入的密碼。
-     * 若密碼相符，當前使用者指派為 **Callee（訪客/接收方）**。
-     * 若密碼不符，阻擋進入並顯示錯誤警告。
+1. 房主在首頁設定密碼，系統產生隨機 `roomId`，該分頁在 sessionStorage 標記為房主。
+2. 雙方都以 `PBKDF2(password, "remoteu:" + roomId)` 算出 `key`（見 `src/lib/roomKey.ts`），讀取 `spaces/{key}`：
+   * **文件不存在**：
+     * 房主分頁：建立 `spaces/{key}`（只含 `createdAt`），指派為 **Caller（房主/發起方）**。
+     * 其他分頁：顯示「房間不存在或密碼錯誤」。密碼錯誤會算出不同的 key，因此兩者無法區分。
+   * **文件已存在**：房主分頁仍為 Caller（並清除舊信令），其他分頁指派為 **Callee（訪客/接收方）**。
+3. 密碼不會寫入資料庫；規則禁止 list `spaces`，只知道 `roomId` 的人無法讀取任何房間資料。
 
 ### 3.2 WebRTC 信令與連線流程 (Signaling Flow)
 
@@ -99,36 +95,15 @@ Caller (房主)                     Firestore                     Callee (訪客
 
 ## 4. Firestore 安全性規則 (Security Rules)
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    
-    // 房間主文件
-    match /rooms/{roomId} {
-      allow read: if true;
-      allow create: if true;
-      // 僅允許密碼相符時更新信令 (offer / answer)
-      allow update: if request.resource.data.password == resource.data.password;
+完整規則見專案根目錄的 [`firestore.rules`](../firestore.rules)，測試見 `tests/firestore.rules.test.mjs`（`npm run test:rules`）。重點：
 
-      // WebRTC ICE Candidates 交換子集合
-      match /callerCandidates/{candidateId} {
-        allow read, write: if true;
-      }
-      match /calleeCandidates/{candidateId} {
-        allow read, write: if true;
-      }
+* `spaces/{key}`：只允許 `get`，不允許 `list`；key 必須是 64 字元 hex。
+* 建立房間時只能有 `createdAt`（不能存密碼）；更新只能動 `session`、`answer`、`joinRequest`，且不能改 `createdAt`；不能刪除。
+* `callerCandidates` / `calleeCandidates`：可讀、可新增、可刪除；欄位限定為 RTCIceCandidateInit 加 `session`。
+* `messages`：只能讀取與新增；`type`、`sender` 限定值，`content` 不超過 1,000,000 字元。
+* 舊的 `rooms/{roomId}` 沒有任何 allow 規則，一律拒絕。
 
-      // 聊天室訊息子集合
-      match /messages/{messageId} {
-        allow read: if true;
-        allow create: if request.resource.data.type in ['text', 'image']
-                      && request.resource.data.content is string;
-      }
-    }
-  }
-}
-```
+已知限制：知道 key 的人（即知道密碼的人）彼此權限相同，規則無法區分房主與訪客；若要區分需加上 Firebase Anonymous Auth。
 
 ---
 

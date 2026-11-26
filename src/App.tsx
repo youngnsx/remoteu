@@ -74,8 +74,8 @@ function Room() {
   const password = searchParams.get('pwd') || '';
   const navigate = useNavigate();
 
-  const { localStream, remoteStream, error, role, isCaller, connectionState, startScreenShare, stopScreenShare } = useWebRTC(roomId!, password);
-  const { messages, sendMessage, sendImage } = useChat(roomId!, isCaller);
+  const { localStream, remoteStream, error, role, isCaller, spaceId, connectionState, startScreenShare, stopScreenShare } = useWebRTC(roomId!, password);
+  const { messages, sendMessage, sendImage } = useChat(spaceId, isCaller);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -280,8 +280,9 @@ function Room() {
                   <div className={`text-[10px] mb-0.5 ${isMine ? 'text-white/60' : 'text-text-secondary'}`}>
                     {msg.sender === 'caller' ? '房主' : '訪客'}
                   </div>
-                  {msg.type === 'text' ? (
-                    <p className="text-sm break-words leading-relaxed">{msg.content}</p>
+                  {msg.type === 'text' || !msg.content.startsWith('data:image/') ? (
+                    // 圖片只接受 data URL，避免載入外部網址
+                    <p className="text-sm break-words leading-relaxed">{msg.type === 'text' ? msg.content : '（無法顯示的圖片）'}</p>
                   ) : (
                     <img
                       src={msg.content}

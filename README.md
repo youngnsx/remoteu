@@ -5,7 +5,8 @@
 - **純前端**：React 19 + TypeScript + Vite + Tailwind CSS，沒有自架後端
 - **信令**：Firebase Cloud Firestore（具名資料庫 `remoteu`，asia-east1）交換 SDP Offer/Answer 與 ICE Candidate
 - **影像**：WebRTC P2P（`getDisplayMedia`），只使用 STUN，沒有 TURN
-- **聊天**：訊息存在 `rooms/{roomId}/messages`，圖片以 Base64 存入（單檔上限 700KB）
+- **聊天**：訊息存在 `spaces/{key}/messages`，圖片以 Base64 存入（單檔上限 700KB）
+- **存取控制**：`key` 由 roomId 與密碼以 PBKDF2 推導，資料庫不存密碼；規則禁止列出房間，只有知道密碼的人算得出路徑（需 https 或 localhost）
 
 ## 快速開始
 
@@ -36,6 +37,7 @@ npm run dev
 | `npm run build` | 型別檢查並建置到 `dist/` |
 | `npm run lint` | 以 oxlint 檢查程式碼 |
 | `npm run preview` | 預覽建置結果 |
+| `npm run test:rules` | 在 Firestore 模擬器上測試 `firestore.rules`（需 firebase-tools 與 Java） |
 | `npm run usage` | 估算 Firestore 用量與費用（加 `-- --log` 寫入 `docs/usage.md`） |
 
 ## 部署
@@ -49,9 +51,11 @@ npm run dev
 src/
   App.tsx              UI 與路由（建立房間、房間頁）
   firebase.ts          Firebase 初始化（具名資料庫 remoteu）
+  lib/roomKey.ts       由 roomId 與密碼推導房間金鑰
   hooks/useWebRTC.ts   以 session 為單位的 WebRTC 信令
   hooks/useChat.ts     聊天訊息與圖片傳送
 firestore.rules        Firestore 安全規則
+tests/                 安全規則測試
 scripts/usage.mjs      Firestore 用量估算
 docs/                  規格、架構、待辦與用量紀錄
 ```

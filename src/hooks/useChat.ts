@@ -16,12 +16,13 @@ export interface ChatMessage {
   timestamp: any;
 }
 
-export function useChat(roomId: string, isCaller: boolean) {
+// spaceId 由 useWebRTC 驗證房間後提供；尚未驗證（null）時不讀寫
+export function useChat(spaceId: string | null, isCaller: boolean) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
-    if (!roomId) return;
-    const messagesRef = collection(db, 'rooms', roomId, 'messages');
+    if (!spaceId) return;
+    const messagesRef = collection(db, 'spaces', spaceId, 'messages');
     const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -33,12 +34,13 @@ export function useChat(roomId: string, isCaller: boolean) {
     });
 
     return () => unsubscribe();
-  }, [roomId]);
+  }, [spaceId]);
 
   const sendMessage = async (content: string, type: 'text' | 'image' = 'text') => {
+    if (!spaceId) return;
     if (!content.trim() && type === 'text') return;
-    
-    const messagesRef = collection(db, 'rooms', roomId, 'messages');
+
+    const messagesRef = collection(db, 'spaces', spaceId, 'messages');
     const sender = isCaller ? 'caller' : 'callee';
     await addDoc(messagesRef, {
       type,
@@ -62,5 +64,5 @@ export function useChat(roomId: string, isCaller: boolean) {
     await sendMessage(dataUrl, 'image');
   };
 
-  return { messages, sendMessage, sendImage };
+  return { messages: spaceId ? messages : [], sendMessage, sendImage };
 }
