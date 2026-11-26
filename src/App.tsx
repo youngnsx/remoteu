@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Video, KeyRound, ArrowRight, Image as ImageIcon, Link as LinkIcon, Check, X, Download } from 'lucide-react';
 import { useWebRTC, markAsHost } from './hooks/useWebRTC';
-import { useChat } from './hooks/useChat';
+import { useChat, MAX_IMAGE_BYTES, MAX_IMAGE_KB } from './hooks/useChat';
 
 // 產生隨機房間代碼（排除易混淆字元 0/o/1/l/i）
 function generateRoomId(length = 10) {
@@ -82,6 +82,20 @@ function Room() {
   const [msgInput, setMsgInput] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`圖片大小不能超過 ${MAX_IMAGE_KB}KB`);
+      return;
+    }
+    try {
+      await sendImage(file);
+    } catch (err) {
+      console.error('傳送圖片失敗', err);
+      alert(`傳送圖片失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   // Auto-scroll chat
   useEffect(() => {
@@ -221,13 +235,7 @@ function Room() {
           e.preventDefault();
           setIsDragging(false);
           const file = e.dataTransfer.files?.[0];
-          if (file && file.type.startsWith('image/')) {
-            if (file.size > 800 * 1024) {
-              alert('圖片大小不能超過 800KB');
-              return;
-            }
-            sendImage(file);
-          }
+          if (file) handleImageFile(file);
         }}
       >
         <div className="p-4 border-b border-border-dark font-medium flex justify-between items-center">
@@ -306,13 +314,9 @@ function Room() {
               ref={fileInputRef}
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) {
-                  if (file.size > 800 * 1024) {
-                    alert('圖片大小不能超過 800KB');
-                    return;
-                  }
-                  sendImage(file);
-                }
+                // 清空值，讓同一張圖可以再次選取
+                e.target.value = '';
+                if (file) handleImageFile(file);
               }}
             />
             <button 

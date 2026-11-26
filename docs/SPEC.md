@@ -92,7 +92,7 @@ Caller (房主)                     Firestore                     Callee (訪客
 ### 3.4 即時聊天規格
 * **文字傳輸**：寫入 `messages` 子集合，雙方透過 `onSnapshot` 監聽並自動滾動至最新訊息。
 * **圖片傳輸**：
-  * **快速方案 (MVP)**：以 `FileReader` 將圖片轉為 Base64 字串存入 Firestore（限制單檔 < 800 KB 以避免達到 Firestore 1 MB 文件限制）。
+  * **快速方案 (MVP)**：以 `FileReader` 將圖片轉為 Base64 字串存入 Firestore（限制單檔 < 700 KB：Base64 編碼後約膨脹為 4/3 倍，約 956 KB，才不會超過 Firestore 1 MiB 文件限制）。
   * **完整方案**：檔案上傳至 Firebase Storage，訊息內容僅儲存圖片的公開下載 URL。
 
 ---

@@ -1,7 +1,7 @@
 # Remote U 系統架構
 
 ## 技術棧 (Tech Stack)
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, Lucide React (Icons)
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Lucide React (Icons)
 - **Signaling & Database**: Firebase Cloud Firestore
 - **P2P Engine**: WebRTC (RTCPeerConnection, getDisplayMedia)
 - **Deployment**: Docker (Nginx Alpine)
