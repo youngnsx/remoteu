@@ -37,6 +37,8 @@ npm run dev
 | `npm run build` | 型別檢查並建置到 `dist/` |
 | `npm run lint` | 以 oxlint 檢查程式碼 |
 | `npm run preview` | 預覽建置結果 |
+| `npm run emulators` | 啟動本機 Firestore 模擬器（需 firebase-tools 與 Java） |
+| `npm run dev:emulator` | 啟動開發伺服器並連到本機模擬器（設定在 `.env.emulator`，不會碰到正式資料） |
 | `npm run test:rules` | 在 Firestore 模擬器上測試 `firestore.rules`（需 firebase-tools 與 Java） |
 | `npm run usage` | 估算 Firestore 用量與費用（加 `-- --log` 寫入 `docs/usage.md`） |
 

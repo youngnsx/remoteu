@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emulator": "vite --mode emulator",
+    "emulators": "firebase emulators:start --project demo-remoteu --only firestore",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",

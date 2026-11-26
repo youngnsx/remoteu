@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -15,4 +15,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 // 使用 asia-east1（台灣）的具名資料庫 remoteu
 export const db = getFirestore(app, 'remoteu');
+
+// npm run dev:emulator 時連到本機 Firestore 模擬器（設定見 .env.emulator）
+const emulatorHost = import.meta.env.VITE_FIRESTORE_EMULATOR as string | undefined;
+if (emulatorHost) {
+  const [host, port] = emulatorHost.split(':');
+  connectFirestoreEmulator(db, host, Number(port));
+}
 export const storage = getStorage(app);
