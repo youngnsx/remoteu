@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 房間資料放在 spaces/{key}，key = PBKDF2(密碼, roomId) 的 64 字元 hex（見 src/lib/roomKey.ts）。
+    // spaces 不允許 list，必須同時知道 roomId 與密碼才算得出路徑；知道路徑即視為房間成員。
+    // 資料庫不存密碼。舊的 rooms/{roomId}（含明文密碼）沒有對應規則，一律拒絕存取。
+    function validKey(key) {
+      return key.matches('^[0-9a-f]{64}$');
+    }
+
+    // TTL 欄位：必須是 Timestamp，且不超過現在 + 25 小時（見 src/lib/expiry.ts），避免永久保存
+    function validExpireAt(data) {
+      return data.expireAt is timestamp
+          && data.expireAt <= request.time + duration.value(25, 'h');
+    }
+
+    match /spaces/{key} {
+      allow get: if validKey(key);
+
+      allow create: if validKey(key)
+                    && request.resource.data.keys().hasOnly(['createdAt', 'expireAt'])
+                    && request.resource.data.createdAt is int
+                    && validExpireAt(request.resource.data);
+
+      // 信令欄位：session（房主的 offer）、answer（訪客回覆）、joinRequest（訪客加入通知）
+      allow update: if request.resource.data.keys().hasOnly(['createdAt', 'expireAt', 'session', 'answer', 'joinRequest'])
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && validExpireAt(request.resource.data)
+                    && request.resource.data.get('session', {}) is map
+                    && request.resource.data.get('answer', {}) is map
+                    && request.resource.data.get('joinRequest', 0) is int;
+
+      // WebRTC ICE candidates，每筆帶 session id
+      function validCandidate() {
+        return request.resource.data.keys().hasOnly(['candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment', 'session', 'expireAt'])
+            && request.resource.data.session is string
+            && validExpireAt(request.resource.data)
+            && request.resource.data.get('candidate', '') is string
+            && request.resource.data.get('candidate', '').size() <= 4096;
+      }
+      match /callerCandidates/{candidateId} {
+        allow read, delete: if validKey(key);
+        allow create: if validKey(key) && validCandidate();
+      }
+      match /calleeCandidates/{candidateId} {
+        allow read, delete: if validKey(key);
+        allow create: if validKey(key) && validCandidate();
+      }
+
+      // 聊天訊息：只能新增，不能修改或刪除
+      match /messages/{messageId} {
+        allow read: if validKey(key);
+        allow create: if validKey(key)
+                      && request.resource.data.keys().hasOnly(['type', 'content', 'sender', 'timestamp', 'expireAt'])
+                      && validExpireAt(request.resource.data)
+                      && request.resource.data.type in ['text', 'image']
+                      && request.resource.data.content is string
+                      && request.resource.data.content.size() <= 1000000
+                      && request.resource.data.sender in ['caller', 'callee']
+                      && request.resource.data.timestamp is int;
+      }
+    }
+  }
+}
