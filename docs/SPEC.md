@@ -29,21 +29,23 @@ firestore/（具名資料庫 remoteu）
 ├── spaces/                               # 不允許 list，必須算得出 key 才能存取
 │   └── {key}/                            # key = PBKDF2(password, "remoteu:" + roomId) 的 64 字元 hex
 │       ├── createdAt: number             # 建立時間戳記 (毫秒)；不存密碼
+│       ├── expireAt: timestamp           # TTL 到期時間；每次有人進房延長為 24 小時後
 │       ├── session: map                  # 房主發布的 session { id, offer: { type, sdp } }
 │       ├── answer: map                   # 訪客回覆 { session, type, sdp }
 │       ├── joinRequest: number           # 訪客加入時寫入的時間戳記，通知房主重新送 offer
 │       ├── callerCandidates/             # 房主的 ICE candidate (子集合)
 │       │   └── {candidateId}/
-│       │       └── [RTCIceCandidateInit] + session: string
+│       │       └── [RTCIceCandidateInit] + session: string + expireAt: timestamp
 │       ├── calleeCandidates/             # 訪客的 ICE candidate (子集合)
 │       │   └── {candidateId}/
-│       │       └── [RTCIceCandidateInit] + session: string
+│       │       └── [RTCIceCandidateInit] + session: string + expireAt: timestamp
 │       └── messages/                     # 即時文字與圖片訊息 (子集合，只能新增)
 │           └── {messageId}/
 │               ├── type: "text" | "image"
 │               ├── content: string       # 文字內容或 Base64 data URL
 │               ├── sender: "caller" | "callee"
-│               └── timestamp: number
+│               ├── timestamp: number
+│               └── expireAt: timestamp   # 送出後 24 小時
 └── rooms/                                # 舊版資料（含明文密碼），規則已全面禁止存取
 ```
 
@@ -100,8 +102,19 @@ Caller (房主)                     Firestore                     Callee (訪客
 * `spaces/{key}`：只允許 `get`，不允許 `list`；key 必須是 64 字元 hex。
 * 建立房間時只能有 `createdAt`（不能存密碼）；更新只能動 `session`、`answer`、`joinRequest`，且不能改 `createdAt`；不能刪除。
 * `callerCandidates` / `calleeCandidates`：可讀、可新增、可刪除；欄位限定為 RTCIceCandidateInit 加 `session`。
+* 所有文件都必須帶 `expireAt`（Timestamp，不超過現在 + 25 小時），交給 TTL policy 自動刪除。
 * `messages`：只能讀取與新增；`type`、`sender` 限定值，`content` 不超過 1,000,000 字元。
 * 舊的 `rooms/{roomId}` 沒有任何 allow 規則，一律拒絕。
+
+### TTL 自動刪除
+
+Firestore TTL policy 依 `expireAt` 刪除到期文件（通常在到期後 24 小時內完成）。TTL 不會連帶刪除子集合，因此以下四個集合群組都要設定，欄位皆為 `expireAt`：
+
+```bash
+for g in spaces messages callerCandidates calleeCandidates; do
+  gcloud firestore fields ttls update expireAt --collection-group=$g --enable-ttl --database=remoteu --project=remote-u
+done
+```
 
 已知限制：知道 key 的人（即知道密碼的人）彼此權限相同，規則無法區分房主與訪客；若要區分需加上 Firebase Anonymous Auth。
 

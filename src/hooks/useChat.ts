@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
+import { expireAt } from '../lib/expiry';
 import { collection, query, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
 
 // Firestore 單一文件上限 1 MiB（1,048,576 bytes）。圖片以 Base64 data URL 存入，
@@ -46,7 +47,8 @@ export function useChat(spaceId: string | null, isCaller: boolean) {
       type,
       content,
       sender,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      expireAt: expireAt(),
     });
   };
 

@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import type { DocumentReference, Unsubscribe } from 'firebase/firestore';
 import { deriveRoomKey } from '../lib/roomKey';
+import { expireAt } from '../lib/expiry';
 
 const servers: RTCConfiguration = {
   iceServers: [
@@ -52,6 +53,7 @@ async function cleanSignaling(roomRef: DocumentReference) {
   await updateDoc(roomRef, {
     session: deleteField(),
     answer: deleteField(),
+    expireAt: expireAt(),
   });
 }
 
@@ -134,6 +136,7 @@ export function useWebRTC(roomId: string, password: string) {
         addDoc(collection(roomRef, localCollection), {
           ...event.candidate.toJSON(),
           session: sessionId,
+          expireAt: expireAt(),
         }).catch(e => console.error('write candidate error:', e));
       }
     };
@@ -150,7 +153,7 @@ export function useWebRTC(roomId: string, password: string) {
     const unsub = onSnapshot(q, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type !== 'added') return;
-        const { session: _session, ...candidate } = change.doc.data();
+        const { session: _session, expireAt: _expireAt, ...candidate } = change.doc.data();
         if (remoteReady) addCandidate(candidate as RTCIceCandidateInit);
         else pending.push(candidate as RTCIceCandidateInit);
       });
@@ -259,9 +262,9 @@ export function useWebRTC(roomId: string, password: string) {
           return;
         }
         isHost = true;
-        await withTimeout(setDoc(ref, { createdAt: Date.now() }), 10000);
+        await withTimeout(setDoc(ref, { createdAt: Date.now(), expireAt: expireAt() }), 10000);
       } else {
-        // 房主重新整理 → 清掉舊信令
+        // 房主重新整理 → 清掉舊信令（同時延長房間期限）
         isHost = hostTab;
         if (isHost) await cleanSignaling(ref);
       }
@@ -303,7 +306,7 @@ export function useWebRTC(roomId: string, password: string) {
         });
       } else {
         // 通知房主有訪客加入，讓房主針對這個訪客重新送 offer
-        await updateDoc(ref, { joinRequest: Date.now() });
+        await updateDoc(ref, { joinRequest: Date.now(), expireAt: expireAt() });
         if (cancelled) return;
         unsubRoom = onSnapshot(ref, (snapshot) => {
           guestHandleSession(ref, snapshot.data()?.session);
